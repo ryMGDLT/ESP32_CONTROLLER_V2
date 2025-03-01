@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http_server/http_server.dart';
 
 final logger = Logger();
 
@@ -62,17 +65,21 @@ class _LightControlPageState extends State<LightControlPage> {
   bool isConnecting = false;
   bool isControlling = false;
   final Map<int, bool> ledStatus = {1: false, 2: false, 3: false, 4: false};
+  HttpServer? _server;
 
   @override
   void initState() {
     super.initState();
     _loadLastConnectionData();
     controller.initBLE();
+    _startHttpServer();
+    _setupControlListener();
   }
 
   @override
   void dispose() {
     _saveWiFiCredentialsIfNeeded();
+    _server?.close();
     controller.dispose();
     ssidController.dispose();
     passwordController.dispose();
@@ -117,6 +124,69 @@ class _LightControlPageState extends State<LightControlPage> {
     } catch (e) {
       logger.e('Error saving Wi-Fi credentials: $e');
     }
+  }
+
+  Future<void> _startHttpServer() async {
+    try {
+      _server = await HttpServer.bind(InternetAddress.anyIPv4, 8080);
+      logger.i("HTTP server started on ${_server!.address.address}:${_server!.port}");
+      await for (var request in _server!) {
+        if (request.method == 'POST' && request.uri.path == '/update') {
+          String content = await utf8.decoder.bind(request).join();
+          var data = jsonDecode(content);
+          int lightNum = data['light'];
+          bool state = data['state'] == "ON";
+          if (lightNum >= 1 && lightNum <= 4) {
+            setState(() {
+              ledStatus[lightNum] = state;
+            });
+            logger.i("Received HTTP update: LED $lightNum to $state");
+          }
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..write('OK')
+            ..close();
+        } else {
+          request.response
+            ..statusCode = HttpStatus.notFound
+            ..write('Not Found')
+            ..close();
+        }
+      }
+    } catch (e) {
+      logger.e("Failed to start HTTP server: $e");
+      await Future.delayed(const Duration(seconds: 5));
+      _startHttpServer(); // Retry on failure
+    }
+  }
+
+  void _setupControlListener() {
+    controller.setupBLEListener().then((_) {
+      if (controller.esp32Device != null) {
+        controller.esp32Device!.discoverServices().then((services) {
+          var controlChar = services
+              .expand((s) => s.characteristics)
+              .firstWhere((c) => c.uuid.toString() == controller.controlUUID);
+          controlChar.setNotifyValue(true);
+          controller.controlSubscription?.cancel();
+          controller.controlSubscription = controlChar.value.listen((value) {
+            String command = String.fromCharCodes(value);
+            if (command.startsWith("LIGHT")) {
+              int lightNum = int.parse(command.substring(5, 6));
+              bool state = command.substring(7) == "ON";
+              if (lightNum >= 1 && lightNum <= 4) {
+                setState(() {
+                  ledStatus[lightNum] = state;
+                });
+                logger.i("Updated LED $lightNum to $state from ESP32 (BLE)");
+              }
+            }
+          });
+        });
+      }
+    }).catchError((e) {
+      logger.e("Error setting up control listener: $e");
+    });
   }
 
   @override
@@ -258,8 +328,15 @@ class _LightControlPageState extends State<LightControlPage> {
                   if (ssidController.text.isEmpty || passwordController.text.isEmpty) {
                     throw Exception("Please enter Wi-Fi SSID and password");
                   }
-                  await controller.configureWiFi(ssidController.text, passwordController.text);
+                  String localIP = await _getLocalIP();
+                  await controller.configureWiFi(ssidController.text, passwordController.text, localIP);
                   esp32IP = controller.esp32IP;
+                  if (esp32IP == "FAIL") {
+                    throw Exception("ESP32 failed to connect to Wi-Fi");
+                  }
+                  if (!RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(esp32IP!)) {
+                    throw Exception("Invalid ESP32 IP received: $esp32IP");
+                  }
                   logger.i("Using ESP32 IP: $esp32IP");
                 } else {
                   await controller.configureBluetooth();
@@ -310,6 +387,23 @@ class _LightControlPageState extends State<LightControlPage> {
               ),
             ),
     );
+  }
+
+  Future<String> _getLocalIP() async {
+    try {
+      List<NetworkInterface> interfaces = await NetworkInterface.list();
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            return addr.address;
+          }
+        }
+      }
+      throw Exception("No local IP found");
+    } catch (e) {
+      logger.e("Error getting local IP: $e");
+      throw e;
+    }
   }
 
   Widget _buildLEDControlCard() {
@@ -418,13 +512,14 @@ class _LightControlPageState extends State<LightControlPage> {
 
   Future<void> controlLight(int lightNum, bool on) async {
     if (!mounted || !isConnected) return;
+    if (lightNum < 1 || lightNum > 4) return;
     setState(() => isControlling = true);
     try {
       if (connectionType == 'wifi') {
         if (esp32IP == null) throw Exception('ESP32 IP not found');
-        await controller.controlWiFi(lightNum, on);
+        await controller.controlWiFi(lightNum - 1, on);
       } else {
-        await controller.controlBluetooth(lightNum, on);
+        await controller.controlBluetooth(lightNum - 1, on);
       }
       setState(() => ledStatus[lightNum] = on);
       if (mounted) {
@@ -454,10 +549,11 @@ class _LightControlPageState extends State<LightControlPage> {
 
 class ESP32Controller {
   String? esp32IP;
-  final String configUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8"; //chaneg and match with the one in the esp32 code
-  final String controlUUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; //change and match with the one in the esp32 code
-  BluetoothDevice? esp32Device; 
+  final String configUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  final String controlUUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+  BluetoothDevice? esp32Device;
   StreamSubscription<List<ScanResult>>? subscription;
+  StreamSubscription<List<int>>? controlSubscription;
 
   Future<void> initBLE() async {
     try {
@@ -494,7 +590,45 @@ class ESP32Controller {
     }
   }
 
-  Future<void> configureWiFi(String ssid, String password) async {
+  Future<void> setupBLEListener() async {
+    int retries = 3;
+    for (int attempt = 0; attempt < retries; attempt++) {
+      try {
+        if (esp32Device == null) await initBLE();
+        if (esp32Device == null) throw Exception("No ESP32 device found");
+
+        logger.i("Setting up BLE listener (Attempt $attempt)...");
+        await esp32Device!.connect(timeout: const Duration(seconds: 20));
+        List<BluetoothService> services = await esp32Device!.discoverServices();
+
+        BluetoothCharacteristic? controlChar;
+        for (var service in services) {
+          for (var char in service.characteristics) {
+            if (char.uuid.toString() == controlUUID) {
+              controlChar = char;
+              break;
+            }
+          }
+          if (controlChar != null) break;
+        }
+
+        if (controlChar == null) throw Exception("Control characteristic not found");
+
+        await controlChar.setNotifyValue(true);
+        break;
+      } catch (e) {
+        logger.e("BLE listener setup failed on attempt $attempt: $e");
+        if (attempt < retries - 1) {
+          await Future.delayed(const Duration(seconds: 5));
+          await esp32Device?.disconnect();
+          continue;
+        }
+        throw e;
+      }
+    }
+  }
+
+  Future<void> configureWiFi(String ssid, String password, String appIP) async {
     int retries = 3;
     for (int attempt = 0; attempt < retries; attempt++) {
       try {
@@ -519,12 +653,12 @@ class ESP32Controller {
         if (configChar == null) throw Exception("Config characteristic not found");
 
         await configChar.setNotifyValue(true);
-        String configString = "WIFI:$ssid:$password";
-        logger.i("Sending Wi-Fi config: $configString");
+        String configString = "WIFI:$ssid:$password|$appIP";
+        logger.i("Sending Wi-Fi config with app IP: $configString");
         await configChar.write(configString.codeUnits, withoutResponse: false);
 
         logger.i("Wi-Fi credentials sent. Waiting for IP from ESP32...");
-        await Future.delayed(const Duration(seconds: 10));
+        await Future.delayed(const Duration(seconds: 35));
 
         List<int> ipBytes = await configChar.read();
         esp32IP = String.fromCharCodes(ipBytes);
@@ -532,6 +666,12 @@ class ESP32Controller {
 
         if (esp32IP == null || esp32IP!.isEmpty) {
           throw Exception("ESP32 IP not received or invalid");
+        }
+        if (esp32IP == "FAIL") {
+          throw Exception("ESP32 failed to connect to Wi-Fi");
+        }
+        if (!RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(esp32IP!)) {
+          throw Exception("Invalid ESP32 IP received: $esp32IP");
         }
         break;
       } catch (e) {
@@ -543,7 +683,6 @@ class ESP32Controller {
         }
         throw e;
       } finally {
-        await esp32Device?.disconnect();
       }
     }
   }
@@ -571,6 +710,7 @@ class ESP32Controller {
         }
 
         if (configChar == null) throw Exception("Config characteristic not found");
+
         await configChar.write("BLUETOOTH".codeUnits);
         logger.i("Bluetooth mode configured");
         break;
@@ -588,15 +728,17 @@ class ESP32Controller {
 
   Future<void> controlWiFi(int lightNum, bool on) async {
     if (esp32IP == null) throw Exception("ESP32 IP not found");
+    if (lightNum < 0 || lightNum > 3) throw Exception("Invalid LED number: $lightNum");
     String path = on ? "on" : "off";
-    logger.i("Sending HTTP request to: http://$esp32IP/light$lightNum/$path");
-    final http.Response response = await http.get(Uri.parse("http://$esp32IP/light$lightNum/$path"));
+    logger.i("Sending HTTP request to: http://$esp32IP/light${lightNum + 1}/$path");
+    final http.Response response = await http.get(Uri.parse("http://$esp32IP/light${lightNum + 1}/$path"));
     logger.i("HTTP response: ${response.statusCode} - ${response.body}");
     if (response.statusCode != 200) throw Exception("HTTP request failed: ${response.statusCode}");
   }
 
   Future<void> controlBluetooth(int lightNum, bool on) async {
     if (esp32Device == null) throw Exception("ESP32 not connected");
+    if (lightNum < 0 || lightNum > 3) throw Exception("Invalid LED number: $lightNum");
     List<BluetoothService> services = await esp32Device!.discoverServices();
 
     BluetoothCharacteristic? controlChar;
@@ -611,7 +753,7 @@ class ESP32Controller {
     }
 
     if (controlChar == null) throw Exception("Control characteristic not found");
-    String command = "LIGHT$lightNum:${on ? 'ON' : 'OFF'}";
+    String command = "LIGHT${lightNum + 1}:${on ? 'ON' : 'OFF'}";
     await controlChar.write(command.codeUnits);
     logger.i("Sent Bluetooth command: $command");
   }
@@ -639,6 +781,7 @@ class ESP32Controller {
 
   void dispose() {
     subscription?.cancel();
+    controlSubscription?.cancel();
     esp32Device?.disconnect();
     subscription = null;
     esp32Device = null;

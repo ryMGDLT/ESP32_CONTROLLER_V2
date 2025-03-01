@@ -41,6 +41,7 @@ dependencies:
   multicast_dns: ^0.3.2+8
   permission_handler: ^11.4.0
   shared_preferences: ^2.2.2
+  http_server: ^1.0.0
 
 
 
