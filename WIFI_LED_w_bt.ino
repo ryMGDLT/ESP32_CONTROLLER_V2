@@ -116,7 +116,7 @@ class ConfigCallbacks : public BLECharacteristicCallbacks {
         WiFi.begin(ssid.c_str(), password.c_str());
 
         int attempts = 0;
-        while (WiFi.status() != WL_CONNECTED && attempts < 60) {
+        while (WiFi.status() != WL_CONNECTED && attempts < 20) { // Reduced to 10 seconds
           delay(500);
           Serial.print(".");
           attempts++;
