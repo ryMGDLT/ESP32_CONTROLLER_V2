@@ -34,13 +34,16 @@ This project is a starting point for a Flutter application integrated with ESP32
 1. Clone this repository:
    ```bash
    git clone https://github.com/RyanRY27/ESP32_Flutter_APP.git 
-2. Navigate to the project directory: 
-  cd esp32app 
-3. Install dependencies: 
-  flutter pub get 
-4. Connect your Android device or use an emulator. 
-5. Run the app:
-  flutter run
+2. Navigate to the project directory:
+   ```bash
+     cd esp32app
+4. Install dependencies:
+   ```bash
+     flutter pub get 
+6. Connect your Android device or use an emulator. 
+7. Run the app:
+   ```bash
+     flutter run
 
 ### Prebuilt APK 
 Download the latest release of the app from the [Releases](https://github.com/RyanRY27/ESP32_Flutter_APP/releases/tag/v1.0.0) page and install it on your Android device. 
