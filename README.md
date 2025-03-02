@@ -48,17 +48,17 @@ Download the latest release of the app from the [Releases](https://github.com/Ry
 ### Customization
 To customize the Bluetooth connection:
 
-- **Open WIFI_LED_w_bt.ino in the Arduino IDE and update the UUID use an UUID generator. 
-- **Edit the UUID in your ESP32 code.
-- **Clone the repository and open android/lib/main.dart in your Flutter editor.
-- **Edit the UUID in main.dart to match the one in the ESP32 code.
-- **Rebuild the app with flutter run. 
+- Open WIFI_LED_w_bt.ino in the Arduino IDE and update the UUID use an UUID generator. 
+- Edit the UUID in your ESP32 code.
+- Clone the repository and open android/lib/main.dart in your Flutter editor.
+- Edit the UUID in main.dart to match the one in the ESP32 code.
+- Rebuild the app with flutter run. 
 
 ### Usage
-- **Launch the app on your Android device.
-- **Choose Bluetooth or Wi-Fi to connect to the ESP32.
-- **For Wi-Fi: The app will detect your current SSID and prompt for the password.
-- **Use the interface or voice commands to control the 4 LEDs connected to the ESP32. 
+- Launch the app on your Android device.
+- Choose Bluetooth or Wi-Fi to connect to the ESP32.
+- For Wi-Fi: The app will detect your current SSID and prompt for the password.
+- Use the interface or voice commands to control the 4 LEDs connected to the ESP32. 
 
 Note: This project is developed to pass an activity in Embedded Systems.
 
