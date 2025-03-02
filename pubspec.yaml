@@ -43,7 +43,7 @@ dependencies:
   shared_preferences: ^2.2.2
   http_server: ^1.0.0
   network_info_plus: ^6.0.0
-
+  flutter_speech: ^2.0.0
 
 
 

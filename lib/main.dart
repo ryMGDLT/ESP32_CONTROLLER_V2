@@ -9,8 +9,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http_server/http_server.dart';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:flutter_speech/flutter_speech.dart';
 
-final logger = Logger();
+final logger = Logger(
+  printer: PrettyPrinter(),
+);
 
 void main() {
   runApp(const MyApp());
@@ -23,8 +26,9 @@ Future<void> requestBLEPermissions() async {
     Permission.bluetoothScan,
     Permission.bluetoothConnect,
     Permission.location,
+    Permission.microphone,
   ].request();
-  logger.i('BLE Permissions: $statuses');
+  logger.i('Permissions: $statuses');
 }
 
 class MyApp extends StatelessWidget {
@@ -66,6 +70,20 @@ class _LightControlPageState extends State<LightControlPage> {
   final Map<int, bool> ledStatus = {1: false, 2: false, 3: false, 4: false};
   HttpServer? _server;
 
+  
+  late SpeechRecognition _speech;
+  bool _isListening = false;
+  String _recognizedText = '';
+  bool _speechRecognitionAvailable = false;
+
+ 
+  final Map<String, int> _numberWords = {
+    'one': 1,
+    'two': 2,
+    'three': 3,
+    'four': 4,
+  };
+
   @override
   void initState() {
     super.initState();
@@ -73,13 +91,127 @@ class _LightControlPageState extends State<LightControlPage> {
     controller.initBLE();
     _startHttpServer();
     _setupControlListener();
+    _initSpeech();
   }
 
-  @override
-  void dispose() {
-    _server?.close();
-    controller.dispose();
-    super.dispose();
+  void _initSpeech() {
+    _speech = SpeechRecognition();
+    _speech.setAvailabilityHandler((bool result) {
+      setState(() => _speechRecognitionAvailable = result);
+      logger.i('Speech recognition available: $result');
+    });
+    _speech.setRecognitionStartedHandler(() {
+      logger.i('Speech recognition started');
+      setState(() => _isListening = true);
+    });
+    _speech.setRecognitionResultHandler((String text) {
+      logger.i('Speech result received: "$text"');
+      setState(() => _recognizedText = text);
+    });
+    _speech.setRecognitionCompleteHandler((String text) {
+      logger.i('Speech recognition completed: "$text"');
+      setState(() {
+        _recognizedText = text;
+        _isListening = false;
+      });
+      _processVoiceCommand(_recognizedText);
+    });
+    _speech.setErrorHandler(() {
+      logger.e('Speech error occurred');
+      setState(() => _isListening = false);
+    });
+
+    _speech.activate('en_US').then((result) {
+      setState(() => _speechRecognitionAvailable = result);
+      logger.i('Speech activated: $result');
+    });
+  }
+
+  void _startListening() async {
+    logger.i('Attempting to start listening...');
+    var status = await Permission.microphone.status;
+    logger.i('Microphone permission status: $status');
+    if (status.isDenied || status.isPermanentlyDenied) {
+      logger.i('Requesting microphone permission...');
+      status = await Permission.microphone.request();
+      logger.i('New permission status: $status');
+      if (status.isDenied || status.isPermanentlyDenied) {
+        logger.e('Microphone permission still denied, cannot proceed');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Microphone permission required for voice control'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+    }
+
+    if (_speechRecognitionAvailable && !_isListening) {
+      _speech.listen().then((result) {
+        logger.i('Listening started: $result');
+      });
+    } else {
+      logger.e('Speech recognition not available or already listening');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Speech recognition not available'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _stopListening() {
+    if (_isListening) {
+      logger.i('Stopping listening...');
+      _speech.stop().then((result) {
+        setState(() => _isListening = false);
+        logger.i('Listening stopped: $result');
+      });
+    }
+  }
+
+  void _processVoiceCommand(String command) {
+    logger.i('Processing command: "$command"');
+    command = command.toLowerCase();
+
+ 
+    if (command.contains('turn on all led') || command.contains('all led on')) {
+      logger.i('Command matched: Turn on all LEDs');
+      for (int i = 1; i <= 4; i++) {
+        controlLight(i, true);
+      }
+    } else if (command.contains('turn off all led') || command.contains('all led off')) {
+      logger.i('Command matched: Turn off all LEDs');
+      for (int i = 1; i <= 4; i++) {
+        controlLight(i, false);
+      }
+    } else {
+   
+      for (int i = 1; i <= 4; i++) {
+        String digit = '$i';
+        String word = _numberWords.keys.firstWhere((k) => _numberWords[k] == i);
+
+     
+        if (command.contains('turn on led $digit') ||
+            command.contains('led $digit on') ||
+            command.contains('turn on led $word') ||
+            command.contains('led $word on')) {
+          logger.i('Command matched: Turn on LED $i');
+          controlLight(i, true);
+        }
+      
+        else if (command.contains('turn off led $digit') ||
+            command.contains('led $digit off') ||
+            command.contains('turn off led $word') ||
+            command.contains('led $word off')) {
+          logger.i('Command matched: Turn off LED $i');
+          controlLight(i, false);
+        }
+      }
+    }
+    setState(() => _recognizedText = '');
   }
 
   Future<void> _loadLastConnectionData() async {
@@ -169,6 +301,14 @@ class _LightControlPageState extends State<LightControlPage> {
   }
 
   @override
+  void dispose() {
+    _server?.close();
+    controller.dispose();
+    _speech.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
@@ -203,6 +343,8 @@ class _LightControlPageState extends State<LightControlPage> {
               if (isConnected) ...[
                 const SizedBox(height: 20),
                 _buildLEDControlCard(),
+                const SizedBox(height: 20),
+                _buildVoiceControlCard(),
                 const SizedBox(height: 20),
                 _buildChangeConnectionButton(),
               ],
@@ -304,7 +446,6 @@ class _LightControlPageState extends State<LightControlPage> {
 
                   String localIP = await _getLocalIP();
 
-                  // Show loading dialog without awaiting
                   dialogContext = context;
                   showDialog(
                     context: dialogContext!,
@@ -321,20 +462,18 @@ class _LightControlPageState extends State<LightControlPage> {
                       );
                     },
                   ).then((_) {
-                    // Ensure dialog is closed if it’s still open
                     if (dialogContext != null && Navigator.canPop(dialogContext!)) {
                       Navigator.pop(dialogContext!);
                     }
                   });
 
-                  // Proceed with configuration without blocking on dialog
                   logger.i("Starting Wi-Fi configuration...");
                   await controller.configureWiFi(ssid, password, localIP);
                   logger.i("Wi-Fi configuration completed.");
                   esp32IP = controller.esp32IP;
 
                   if (dialogContext != null && Navigator.canPop(dialogContext!)) {
-                    Navigator.pop(dialogContext!); // Close loading dialog
+                    Navigator.pop(dialogContext!);
                   }
 
                   if (esp32IP == "FAIL") {
@@ -393,9 +532,9 @@ class _LightControlPageState extends State<LightControlPage> {
               height: 20,
               child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
             )
-          : Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10.0),
-              child: const Text(
+          : const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10.0),
+              child: Text(
                 'Connect',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
@@ -469,6 +608,63 @@ class _LightControlPageState extends State<LightControlPage> {
             activeTrackColor: Colors.indigo.shade100,
             inactiveThumbColor: Colors.grey,
             inactiveTrackColor: Colors.grey.shade300,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVoiceControlCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade200,
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Voice Control',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.indigo),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: _isListening ? _stopListening : _startListening,
+            style: ElevatedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              backgroundColor: _isListening ? Colors.red : Colors.indigo,
+              foregroundColor: Colors.white,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_isListening ? Icons.mic_off : Icons.mic),
+                const SizedBox(width: 10),
+                Text(
+                  _isListening ? 'Stop Listening' : 'Start Voice Control',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Say: "Turn on LED 1", "Turn off LED two", "Turn on all LEDs", or "Turn off all LEDs"',
+            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Recognized: $_recognizedText',
+            style: const TextStyle(fontSize: 16, color: Colors.black87),
           ),
         ],
       ),
@@ -875,10 +1071,10 @@ class ESP32Controller {
   }
 
   void dispose() {
-    subscription?.cancel(); 
+    subscription?.cancel();
     controlSubscription?.cancel();
     esp32Device?.disconnect();
     subscription = null;
     esp32Device = null;
-  } 
+  }
 }
