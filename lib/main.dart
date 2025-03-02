@@ -38,6 +38,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'ESP32 Light Control',
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.indigo,
         scaffoldBackgroundColor: Colors.grey[100],
@@ -172,47 +173,62 @@ class _LightControlPageState extends State<LightControlPage> {
     }
   }
 
-  void _processVoiceCommand(String command) {
-    logger.i('Processing command: "$command"');
-    command = command.toLowerCase();
+void _processVoiceCommand(String command) {
+  logger.i('Processing command: "$command"');
+  command = command.toLowerCase().trim();
 
+  if (command.contains('turn on all led') || command.contains('all led on')) {
+    logger.i('Command matched: Turn on all LEDs');
+    for (int i = 1; i <= 4; i++) {
+      controlLight(i, true);
+    }
+  } else if (command.contains('turn off all led') || command.contains('all led off')) {
+    logger.i('Command matched: Turn off all LEDs');
+    for (int i = 1; i <= 4; i++) {
+      controlLight(i, false);
+    }
+  } else {
  
-    if (command.contains('turn on all led') || command.contains('all led on')) {
-      logger.i('Command matched: Turn on all LEDs');
-      for (int i = 1; i <= 4; i++) {
-        controlLight(i, true);
-      }
-    } else if (command.contains('turn off all led') || command.contains('all led off')) {
-      logger.i('Command matched: Turn off all LEDs');
-      for (int i = 1; i <= 4; i++) {
-        controlLight(i, false);
-      }
-    } else {
-   
-      for (int i = 1; i <= 4; i++) {
-        String digit = '$i';
-        String word = _numberWords.keys.firstWhere((k) => _numberWords[k] == i);
+    List<String> words = command.split(RegExp(r'\s+'));
+    bool isTurnOn = command.contains('turn on') || command.contains('on');
+    bool isTurnOff = command.contains('turn off') || command.contains('off');
+    
+    if (!isTurnOn && !isTurnOff) {
+      logger.i('No valid turn on/off command detected');
+      return;
+    }
+    Set<int> ledsToControl = {};
 
+    for (int i = 0; i < words.length; i++) {
+      String word = words[i];
+
+    
+      if (RegExp(r'^[1-4]$').hasMatch(word)) {
+        ledsToControl.add(int.parse(word));
+      } else if (_numberWords.containsKey(word)) {
+        ledsToControl.add(_numberWords[word]!);
+      } else if (word == 'led' && i + 1 < words.length) {
      
-        if (command.contains('turn on led $digit') ||
-            command.contains('led $digit on') ||
-            command.contains('turn on led $word') ||
-            command.contains('led $word on')) {
-          logger.i('Command matched: Turn on LED $i');
-          controlLight(i, true);
-        }
-      
-        else if (command.contains('turn off led $digit') ||
-            command.contains('led $digit off') ||
-            command.contains('turn off led $word') ||
-            command.contains('led $word off')) {
-          logger.i('Command matched: Turn off LED $i');
-          controlLight(i, false);
+        String nextWord = words[i + 1];
+        if (RegExp(r'^[1-4]$').hasMatch(nextWord)) {
+          ledsToControl.add(int.parse(nextWord));
+        } else if (_numberWords.containsKey(nextWord)) {
+          ledsToControl.add(_numberWords[nextWord]!);
         }
       }
     }
-    setState(() => _recognizedText = '');
+
+    if (ledsToControl.isNotEmpty) {
+      for (int led in ledsToControl) {
+        logger.i('Command matched: ${isTurnOn ? "Turn on" : "Turn off"} LED $led');
+        controlLight(led, isTurnOn);
+      }
+    } else {
+      logger.i('No valid LED numbers detected in command');
+    }
   }
+  setState(() => _recognizedText = '');
+}
 
   Future<void> _loadLastConnectionData() async {
     try {
