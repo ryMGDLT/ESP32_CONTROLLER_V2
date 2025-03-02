@@ -8,6 +8,7 @@ import 'package:logger/logger.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http_server/http_server.dart';
+import 'package:network_info_plus/network_info_plus.dart';
 
 final logger = Logger();
 
@@ -58,8 +59,6 @@ class LightControlPage extends StatefulWidget {
 class _LightControlPageState extends State<LightControlPage> {
   final ESP32Controller controller = ESP32Controller();
   String connectionType = 'bluetooth';
-  final TextEditingController ssidController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
   String? esp32IP;
   bool isConnected = false;
   bool isConnecting = false;
@@ -78,11 +77,8 @@ class _LightControlPageState extends State<LightControlPage> {
 
   @override
   void dispose() {
-    _saveWiFiCredentialsIfNeeded();
     _server?.close();
     controller.dispose();
-    ssidController.dispose();
-    passwordController.dispose();
     super.dispose();
   }
 
@@ -93,10 +89,6 @@ class _LightControlPageState extends State<LightControlPage> {
       if (savedType != null) {
         setState(() {
           connectionType = savedType;
-          if (connectionType == 'wifi') {
-            ssidController.text = prefs.getString('lastSSID') ?? '';
-            passwordController.text = prefs.getString('lastPassword') ?? '';
-          }
         });
       }
     } catch (e) {
@@ -110,19 +102,6 @@ class _LightControlPageState extends State<LightControlPage> {
       await prefs.setString('lastConnectionType', type);
     } catch (e) {
       logger.e('Error saving connection type: $e');
-    }
-  }
-
-  Future<void> _saveWiFiCredentialsIfNeeded() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (connectionType == 'wifi') {
-        await prefs.setString('lastSSID', ssidController.text);
-        await prefs.setString('lastPassword', passwordController.text);
-        logger.i('Saved Wi-Fi credentials: SSID=${ssidController.text}, Password=${passwordController.text}');
-      }
-    } catch (e) {
-      logger.e('Error saving Wi-Fi credentials: $e');
     }
   }
 
@@ -156,7 +135,7 @@ class _LightControlPageState extends State<LightControlPage> {
     } catch (e) {
       logger.e("Failed to start HTTP server: $e");
       await Future.delayed(const Duration(seconds: 5));
-      _startHttpServer(); // Retry on failure
+      _startHttpServer();
     }
   }
 
@@ -264,18 +243,12 @@ class _LightControlPageState extends State<LightControlPage> {
               _buildRadioOption('Wi-Fi', 'wifi'),
             ],
           ),
-          if (connectionType == 'wifi') ...[
-            const SizedBox(height: 20),
-            _buildTextField(ssidController, 'Wi-Fi SSID', Icons.wifi, enabled: !isConnected),
+          if (connectionType == 'wifi' && esp32IP != null) ...[
             const SizedBox(height: 16),
-            _buildTextField(passwordController, 'Wi-Fi Password', Icons.lock, obscure: true, enabled: !isConnected),
-            if (esp32IP != null) ...[
-              const SizedBox(height: 16),
-              Text(
-                'ESP32 IP: $esp32IP',
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.green),
-              ),
-            ],
+            Text(
+              'ESP32 IP: $esp32IP',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.green),
+            ),
           ],
           const SizedBox(height: 20),
           if (!isConnected) _buildConnectButton(),
@@ -298,22 +271,11 @@ class _LightControlPageState extends State<LightControlPage> {
     );
   }
 
-  Widget _buildTextField(TextEditingController controller, String label, IconData icon,
-      {bool obscure = false, bool enabled = true}) {
-    return TextField(
-      controller: controller,
-      obscureText: obscure,
-      enabled: enabled,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: Colors.indigo),
-        filled: true,
-        fillColor: enabled ? Colors.grey.shade100 : Colors.grey.shade300,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-      ),
+  Future<String?> _promptForPassword(BuildContext context, String ssid) async {
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _PasswordDialog(ssid: ssid),
     );
   }
 
@@ -323,14 +285,58 @@ class _LightControlPageState extends State<LightControlPage> {
           ? null
           : () async {
               setState(() => isConnecting = true);
+              BuildContext? dialogContext;
+
               try {
                 if (connectionType == 'wifi') {
-                  if (ssidController.text.isEmpty || passwordController.text.isEmpty) {
-                    throw Exception("Please enter Wi-Fi SSID and password");
+                  final networkInfo = NetworkInfo();
+                  String? ssid = await networkInfo.getWifiName();
+                  if (ssid == null || ssid.isEmpty) {
+                    throw Exception("Not connected to Wi-Fi or unable to retrieve SSID");
                   }
+                  ssid = ssid.replaceAll('"', '');
+                  logger.i("Retrieved SSID: $ssid");
+
+                  String? password = await _promptForPassword(context, ssid);
+                  if (password == null) {
+                    throw Exception("Password entry cancelled by user");
+                  }
+
                   String localIP = await _getLocalIP();
-                  await controller.configureWiFi(ssidController.text, passwordController.text, localIP);
+
+                  // Show loading dialog without awaiting
+                  dialogContext = context;
+                  showDialog(
+                    context: dialogContext!,
+                    barrierDismissible: false,
+                    builder: (BuildContext ctx) {
+                      return const AlertDialog(
+                        content: Row(
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(width: 20),
+                            Text("Connecting to ESP32..."),
+                          ],
+                        ),
+                      );
+                    },
+                  ).then((_) {
+                    // Ensure dialog is closed if it’s still open
+                    if (dialogContext != null && Navigator.canPop(dialogContext!)) {
+                      Navigator.pop(dialogContext!);
+                    }
+                  });
+
+                  // Proceed with configuration without blocking on dialog
+                  logger.i("Starting Wi-Fi configuration...");
+                  await controller.configureWiFi(ssid, password, localIP);
+                  logger.i("Wi-Fi configuration completed.");
                   esp32IP = controller.esp32IP;
+
+                  if (dialogContext != null && Navigator.canPop(dialogContext!)) {
+                    Navigator.pop(dialogContext!); // Close loading dialog
+                  }
+
                   if (esp32IP == "FAIL") {
                     throw Exception("ESP32 failed to connect to Wi-Fi");
                   }
@@ -339,11 +345,14 @@ class _LightControlPageState extends State<LightControlPage> {
                   }
                   logger.i("Using ESP32 IP: $esp32IP");
                 } else {
+                  logger.i("Starting Bluetooth configuration...");
                   await controller.configureBluetooth();
+                  logger.i("Bluetooth configuration completed.");
                 }
-                setState(() => isConnected = true);
-                await _saveConnectionType(connectionType);
+
                 if (mounted) {
+                  setState(() => isConnected = true);
+                  await _saveConnectionType(connectionType);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Connected successfully'),
@@ -355,6 +364,9 @@ class _LightControlPageState extends State<LightControlPage> {
               } catch (e) {
                 logger.e("Connection failed: $e");
                 if (mounted) {
+                  if (dialogContext != null && Navigator.canPop(dialogContext!)) {
+                    Navigator.pop(dialogContext!);
+                  }
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('Connection failed: $e'),
@@ -364,7 +376,9 @@ class _LightControlPageState extends State<LightControlPage> {
                   );
                 }
               } finally {
-                setState(() => isConnecting = false);
+                if (mounted) {
+                  setState(() => isConnecting = false);
+                }
               }
             },
       style: ElevatedButton.styleFrom(
@@ -402,7 +416,7 @@ class _LightControlPageState extends State<LightControlPage> {
       throw Exception("No local IP found");
     } catch (e) {
       logger.e("Error getting local IP: $e");
-      throw e;
+      rethrow;
     }
   }
 
@@ -469,8 +483,6 @@ class _LightControlPageState extends State<LightControlPage> {
                 isConnecting = true;
                 isConnected = false;
                 ledStatus.updateAll((key, value) => false);
-                ssidController.clear();
-                passwordController.clear();
               });
               try {
                 await controller.switchConfig(connectionType);
@@ -496,7 +508,7 @@ class _LightControlPageState extends State<LightControlPage> {
                   );
                 }
               } finally {
-                setState(() => isConnecting = false);
+                if (mounted) setState(() => isConnecting = false);
               }
             }
           : null,
@@ -547,6 +559,67 @@ class _LightControlPageState extends State<LightControlPage> {
   }
 }
 
+class _PasswordDialog extends StatefulWidget {
+  final String ssid;
+
+  const _PasswordDialog({required this.ssid});
+
+  @override
+  _PasswordDialogState createState() => _PasswordDialogState();
+}
+
+class _PasswordDialogState extends State<_PasswordDialog> {
+  late TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Enter Wi-Fi Password for "${widget.ssid}"'),
+      content: TextField(
+        controller: _controller,
+        obscureText: true,
+        decoration: const InputDecoration(
+          labelText: 'Password',
+          prefixIcon: Icon(Icons.lock),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () {
+            if (_controller.text.isNotEmpty) {
+              Navigator.of(context).pop(_controller.text);
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Please enter a password'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+            }
+          },
+          child: const Text('OK'),
+        ),
+      ],
+    );
+  }
+}
+
 class ESP32Controller {
   String? esp32IP;
   final String configUUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
@@ -566,7 +639,6 @@ class ESP32Controller {
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 20));
 
       subscription = FlutterBluePlus.scanResults.listen((List<ScanResult> results) async {
-        logger.i("Scanning devices: ${results.map((r) => '${r.device.platformName} (${r.device.remoteId})').toList()}");
         for (final ScanResult result in results) {
           logger.i("Found device: ${result.device.platformName}, ID: ${result.device.remoteId}, RSSI: ${result.rssi}");
           if (result.device.platformName == "ESP32_Light_Control" || result.device.remoteId.toString().contains("A0:5A")) {
@@ -586,7 +658,7 @@ class ESP32Controller {
       }
     } catch (e) {
       logger.e("BLE initialization failed: $e");
-      throw e;
+      rethrow;
     }
   }
 
@@ -623,7 +695,7 @@ class ESP32Controller {
           await esp32Device?.disconnect();
           continue;
         }
-        throw e;
+        rethrow;
       }
     }
   }
@@ -658,11 +730,35 @@ class ESP32Controller {
         await configChar.write(configString.codeUnits, withoutResponse: false);
 
         logger.i("Wi-Fi credentials sent. Waiting for IP from ESP32...");
-        await Future.delayed(const Duration(seconds: 35));
+        const maxWaitSeconds = 20;
+        const pollInterval = Duration(seconds: 1);
+        int elapsedSeconds = 0;
 
-        List<int> ipBytes = await configChar.read();
-        esp32IP = String.fromCharCodes(ipBytes);
-        logger.i("Received ESP32 IP via BLE: $esp32IP");
+        while (elapsedSeconds < maxWaitSeconds) {
+          BluetoothConnectionState connectionState = await esp32Device!.connectionState.first;
+          if (connectionState != BluetoothConnectionState.connected) {
+            throw Exception("ESP32 disconnected before IP could be read");
+          }
+
+          try {
+            List<int> ipBytes = await configChar.read().timeout(const Duration(seconds: 1));
+            if (ipBytes.isNotEmpty) {
+              logger.i("Raw IP bytes received: $ipBytes");
+              esp32IP = String.fromCharCodes(ipBytes);
+              logger.i("Received ESP32 IP via BLE: $esp32IP");
+              break;
+            }
+          } catch (e) {
+            logger.i("No IP yet, waiting... ($elapsedSeconds/$maxWaitSeconds seconds)");
+          }
+
+          await Future.delayed(pollInterval);
+          elapsedSeconds += pollInterval.inSeconds;
+        }
+
+        if (elapsedSeconds >= maxWaitSeconds) {
+          throw Exception("Timeout waiting for ESP32 IP response");
+        }
 
         if (esp32IP == null || esp32IP!.isEmpty) {
           throw Exception("ESP32 IP not received or invalid");
@@ -681,8 +777,7 @@ class ESP32Controller {
           await esp32Device?.disconnect();
           continue;
         }
-        throw e;
-      } finally {
+        rethrow;
       }
     }
   }
@@ -721,7 +816,7 @@ class ESP32Controller {
           await esp32Device?.disconnect();
           continue;
         }
-        throw e;
+        rethrow;
       }
     }
   }
@@ -775,15 +870,15 @@ class ESP32Controller {
       }
     } catch (e) {
       logger.e("Switch config failed: $e");
-      throw e;
+      rethrow;
     }
   }
 
   void dispose() {
-    subscription?.cancel();
+    subscription?.cancel(); 
     controlSubscription?.cancel();
     esp32Device?.disconnect();
     subscription = null;
     esp32Device = null;
-  }
+  } 
 }
