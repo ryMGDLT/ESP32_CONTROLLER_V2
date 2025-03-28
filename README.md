@@ -8,6 +8,9 @@ A Flutter-based mobile application designed to control an ESP32 microcontroller 
 - **Wi-Fi Control**: Use Wi-Fi to manage the ESP32 remotely.
 - **Auto Wi-Fi Detection**: Automatically pulls the SSID of the Wi-Fi network the user is connected to and prompts for the password (due to Android security restrictions, the app cannot access the password directly).
 - **Voice Commands**: Control the ESP32 LEDs using voice input.
+- **Scheduled On/Off**: Set specific times for the LEDs to turn on and off automatically.
+- **NTP Integration**: Uses Network Time Protocol (NTP) to synchronize the ESP32’s clock with real-world time for accurate scheduling.
+- **RTOS Support**: Leverages Real-Time Operating System (RTOS) on the ESP32 for efficient task management and scheduling.
 - **Customizable**: Modify the Bluetooth UUID for a unique connection between the app and ESP32.
 
 ## Getting Started
