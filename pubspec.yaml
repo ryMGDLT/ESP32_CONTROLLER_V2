@@ -41,9 +41,13 @@ dependencies:
   multicast_dns: ^0.3.2+8
   permission_handler: ^11.4.0
   shared_preferences: ^2.2.2
-  http_server: ^1.0.0
+  connectivity_plus: ^5.0.2
   network_info_plus: ^6.0.0
   flutter_speech: ^2.0.0
+  logging: ^1.2.0
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  syncfusion_flutter_datepicker: ^26.2.10
 
 
 
