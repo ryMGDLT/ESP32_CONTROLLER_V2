@@ -46,6 +46,7 @@ void startHttpServer() async {
     print("SEVERE: ${DateTime.now()}: Failed to start HTTP server: $e");
   }
 }
+
 void main() {
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
@@ -76,7 +77,7 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.indigo,
-        scaffoldBackgroundColor: Colors.grey[100],
+        scaffoldBackgroundColor: Colors.transparent, // Changed to transparent for background
         textTheme: const TextTheme(
           bodyLarge: TextStyle(fontFamily: 'Poppins', fontSize: 16),
           bodyMedium: TextStyle(fontFamily: 'Poppins', fontSize: 14),
@@ -424,24 +425,43 @@ class _LightControlPageState extends State<LightControlPage> {
           ),
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildConnectionCard(),
-              if (isConnected) ...[
-                const SizedBox(height: 20),
-                _buildLEDControlCard(),
-                const SizedBox(height: 20),
-                _buildVoiceControlCard(),
-                const SizedBox(height: 20),
-                if (connectionType == 'wifi') _buildScheduleCard(),
-                const SizedBox(height: 20),
-                _buildChangeConnectionButton(),
-              ],
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              const Color(0xFF1C2526), // Dark metallic black
+              const Color(0xFF2E3B3E), // Dark gray
             ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF00D4FF).withOpacity(0.1), // Neon blue glow
+              blurRadius: 20,
+              spreadRadius: 5,
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20.0),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildConnectionCard(),
+                if (isConnected) ...[
+                  const SizedBox(height: 20),
+                  _buildLEDControlCard(),
+                  const SizedBox(height: 20),
+                  _buildVoiceControlCard(),
+                  const SizedBox(height: 20),
+                  if (connectionType == 'wifi') _buildScheduleCard(),
+                  const SizedBox(height: 20),
+                  _buildChangeConnectionButton(),
+                ],
+              ],
+            ),
           ),
         ),
       ),
@@ -680,44 +700,44 @@ class _LightControlPageState extends State<LightControlPage> {
     );
   }
 
-Widget _buildLightControl(int lightNum) {
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 10),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(  
-          children: [
-            Text(
-              'LED $lightNum ',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: ledStatus[lightNum]! ? Colors.indigo : Colors.grey.shade600,
+  Widget _buildLightControl(int lightNum) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(  
+            children: [
+              Text(
+                'LED $lightNum ',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: ledStatus[lightNum]! ? Colors.indigo : Colors.grey.shade600,
+                ),
               ),
-            ),
-            Text(
-              ledStatus[lightNum]! ? 'ON' : 'OFF',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: ledStatus[lightNum]! ? Colors.green : Colors.red,
+              Text(
+                ledStatus[lightNum]! ? 'ON' : 'OFF',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: ledStatus[lightNum]! ? Colors.green : Colors.red,
+                ),
               ),
-            ),
-          ],
-        ),
-        Switch(
-          value: ledStatus[lightNum]!,
-          onChanged: isControlling ? null : (value) => controlLight(lightNum, value),
-          activeColor: Colors.indigo,
-          activeTrackColor: Colors.indigo.shade100,
-          inactiveThumbColor: Colors.grey,
-          inactiveTrackColor: Colors.grey.shade300,
-        ),
-      ],
-    ),
-  );
-}
+            ],
+          ),
+          Switch(
+            value: ledStatus[lightNum]!,
+            onChanged: isControlling ? null : (value) => controlLight(lightNum, value),
+            activeColor: Colors.indigo,
+            activeTrackColor: Colors.indigo.shade100,
+            inactiveThumbColor: Colors.grey,
+            inactiveTrackColor: Colors.grey.shade300,
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildVoiceControlCard() {
     return Container(
@@ -804,188 +824,187 @@ Widget _buildLightControl(int lightNum) {
     );
   }
 
-Widget _buildScheduleControl(int lightNum) {
-  bool isScheduled = schedules[lightNum]!["scheduled"] == 1;
-  return Padding(
-    padding: const EdgeInsets.symmetric(vertical: 10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'LED $lightNum Schedule',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-            ),
-            ElevatedButton(
-              onPressed: connectionType == 'wifi' && isConnected
-                  ? () => _showScheduleDialog(lightNum)
-                  : null,
-              child: Text(isScheduled ? 'Edit Schedule' : 'Set Schedule'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.indigo,
-                foregroundColor: Colors.white,
+  Widget _buildScheduleControl(int lightNum) {
+    bool isScheduled = schedules[lightNum]!["scheduled"] == 1;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'LED $lightNum Schedule',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
               ),
-            ),
-          ],
-        ),
-        if (isScheduled)
-          Text(
-            'ON: ${_formatTime(schedules[lightNum]!["hourOn"]!, schedules[lightNum]!["minuteOn"]!)} - '
-            'OFF: ${_formatTime(schedules[lightNum]!["hourOff"]!, schedules[lightNum]!["minuteOff"]!)}',
-            style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              ElevatedButton(
+                onPressed: connectionType == 'wifi' && isConnected
+                    ? () => _showScheduleDialog(lightNum)
+                    : null,
+                child: Text(isScheduled ? 'Edit Schedule' : 'Set Schedule'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.indigo,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
           ),
-      ],
-    ),
-  );
-}
-
-
-String _formatTime(int hour, int minute) {
-  String period = hour >= 12 ? 'PM' : 'AM';
-  int displayHour = hour % 12 == 0 ? 12 : hour % 12;
-  return '${displayHour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
-}
-
-void _showScheduleDialog(int lightNum) {
-  DateTime? onDateTime = schedules[lightNum]!["scheduled"] == 1
-      ? DateTime(
-          DateTime.now().year,
-          DateTime.now().month,
-          DateTime.now().day,
-          schedules[lightNum]!["hourOn"]!,
-          schedules[lightNum]!["minuteOn"]!,
-        )
-      : null;
-  DateTime? offDateTime = schedules[lightNum]!["scheduled"] == 1
-      ? DateTime(
-          DateTime.now().year,
-          DateTime.now().month,
-          DateTime.now().day,
-          schedules[lightNum]!["hourOff"]!,
-          schedules[lightNum]!["minuteOff"]!,
-        )
-      : null;
-  bool isSettingOnTime = true;
-
-  void showTimePickerDialog(BuildContext context, Function(DateTime) onTimeSet) {
-    showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-      builder: (context, child) {
-        return MediaQuery(
-          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
-          child: child!,
-        );
-      },
-    ).then((pickedTime) {
-      if (pickedTime != null) {
-        DateTime now = DateTime.now();
-        int hour24 = pickedTime.hourOfPeriod +
-            (pickedTime.period == DayPeriod.pm && pickedTime.hour != 12 ? 12 : 0) -
-            (pickedTime.period == DayPeriod.am && pickedTime.hour == 12 ? 12 : 0);
-        onTimeSet(DateTime(now.year, now.month, now.day, hour24, pickedTime.minute));
-      }
-    });
+          if (isScheduled)
+            Text(
+              'ON: ${_formatTime(schedules[lightNum]!["hourOn"]!, schedules[lightNum]!["minuteOn"]!)} - '
+              'OFF: ${_formatTime(schedules[lightNum]!["hourOff"]!, schedules[lightNum]!["minuteOff"]!)}',
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+            ),
+        ],
+      ),
+    );
   }
 
-  showDialog(
-    context: context,
-    builder: (dialogContext) {
-      return StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text(isSettingOnTime ? 'ON Schedule' : 'OFF Schedule'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  SfDateRangePicker(
-                    selectionMode: DateRangePickerSelectionMode.single,
-                    initialSelectedDate: isSettingOnTime
-                        ? (onDateTime ?? DateTime.now())
-                        : (offDateTime ?? DateTime.now()),
-                    minDate: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day), 
-                    maxDate: DateTime.now().add(const Duration(days: 365)),
-                    onSelectionChanged: (DateRangePickerSelectionChangedArgs args) {
-                      final DateTime? pickedDate = args.value as DateTime?;
-                      if (pickedDate != null) {
-                        showTimePickerDialog(context, (selectedTime) {
-                          setDialogState(() {
-                            if (isSettingOnTime) {
-                              onDateTime = selectedTime;
-                            } else {
-                              offDateTime = selectedTime;
-                            }
+  String _formatTime(int hour, int minute) {
+    String period = hour >= 12 ? 'PM' : 'AM';
+    int displayHour = hour % 12 == 0 ? 12 : hour % 12;
+    return '${displayHour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')} $period';
+  }
+
+  void _showScheduleDialog(int lightNum) {
+    DateTime? onDateTime = schedules[lightNum]!["scheduled"] == 1
+        ? DateTime(
+            DateTime.now().year,
+            DateTime.now().month,
+            DateTime.now().day,
+            schedules[lightNum]!["hourOn"]!,
+            schedules[lightNum]!["minuteOn"]!,
+          )
+        : null;
+    DateTime? offDateTime = schedules[lightNum]!["scheduled"] == 1
+        ? DateTime(
+            DateTime.now().year,
+            DateTime.now().month,
+            DateTime.now().day,
+            schedules[lightNum]!["hourOff"]!,
+            schedules[lightNum]!["minuteOff"]!,
+          )
+        : null;
+    bool isSettingOnTime = true;
+
+    void showTimePickerDialog(BuildContext context, Function(DateTime) onTimeSet) {
+      showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.now(),
+        builder: (context, child) {
+          return MediaQuery(
+            data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: false),
+            child: child!,
+          );
+        },
+      ).then((pickedTime) {
+        if (pickedTime != null) {
+          DateTime now = DateTime.now();
+          int hour24 = pickedTime.hourOfPeriod +
+              (pickedTime.period == DayPeriod.pm && pickedTime.hour != 12 ? 12 : 0) -
+              (pickedTime.period == DayPeriod.am && pickedTime.hour == 12 ? 12 : 0);
+          onTimeSet(DateTime(now.year, now.month, now.day, hour24, pickedTime.minute));
+        }
+      });
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(isSettingOnTime ? 'ON Schedule' : 'OFF Schedule'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SfDateRangePicker(
+                      selectionMode: DateRangePickerSelectionMode.single,
+                      initialSelectedDate: isSettingOnTime
+                          ? (onDateTime ?? DateTime.now())
+                          : (offDateTime ?? DateTime.now()),
+                      minDate: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day), 
+                      maxDate: DateTime.now().add(const Duration(days: 365)),
+                      onSelectionChanged: (DateRangePickerSelectionChangedArgs args) {
+                        final DateTime? pickedDate = args.value as DateTime?;
+                        if (pickedDate != null) {
+                          showTimePickerDialog(context, (selectedTime) {
+                            setDialogState(() {
+                              if (isSettingOnTime) {
+                                onDateTime = selectedTime;
+                              } else {
+                                offDateTime = selectedTime;
+                              }
+                            });
                           });
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    if (isSettingOnTime && onDateTime != null) {
+                      setDialogState(() => isSettingOnTime = false);
+                    } else if (!isSettingOnTime && offDateTime != null) {
+                      try {
+                        controller.setScheduleWiFi(
+                          lightNum - 1,
+                          onDateTime!.hour,
+                          onDateTime!.minute,
+                          offDateTime!.hour,
+                          offDateTime!.minute,
+                        );
+                        setState(() {
+                          schedules[lightNum] = {
+                            "hourOn": onDateTime!.hour,
+                            "minuteOn": onDateTime!.minute,
+                            "hourOff": offDateTime!.hour,
+                            "minuteOff": offDateTime!.minute,
+                            "scheduled": 1,
+                          };
                         });
+                        Navigator.pop(dialogContext);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Schedule set for LED $lightNum'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to set schedule: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
                       }
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () {
-                  if (isSettingOnTime && onDateTime != null) {
-                    setDialogState(() => isSettingOnTime = false);
-                  } else if (!isSettingOnTime && offDateTime != null) {
-                    try {
-                      controller.setScheduleWiFi(
-                        lightNum - 1,
-                        onDateTime!.hour,
-                        onDateTime!.minute,
-                        offDateTime!.hour,
-                        offDateTime!.minute,
-                      );
-                      setState(() {
-                        schedules[lightNum] = {
-                          "hourOn": onDateTime!.hour,
-                          "minuteOn": onDateTime!.minute,
-                          "hourOff": offDateTime!.hour,
-                          "minuteOff": offDateTime!.minute,
-                          "scheduled": 1,
-                        };
-                      });
-                      Navigator.pop(dialogContext);
+                    } else {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Schedule set for LED $lightNum'),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Failed to set schedule: $e'),
+                        const SnackBar(
+                          content: Text('Please select a time'),
                           backgroundColor: Colors.red,
                         ),
                       );
                     }
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Please select a time'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                },
-                child: Text(isSettingOnTime ? 'Next' : 'Save'),
-              ),
-            ],
-          );
-        },
-      );
-    },
-  );
-}
+                  },
+                  child: Text(isSettingOnTime ? 'Next' : 'Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildChangeConnectionButton() {
     return ElevatedButton(
@@ -1283,7 +1302,6 @@ class ESP32Controller {
         logger.info("Sending Wi-Fi config: $configString");
         await configChar.write(configString.codeUnits, withoutResponse: false);
         await Future.delayed(const Duration(milliseconds: 500));
-
         esp32IP = await ipCompleter.future.timeout(const Duration(seconds: 15), onTimeout: () {
           throw Exception("Timeout waiting for valid ESP32 IP");
         });
@@ -1300,7 +1318,7 @@ class ESP32Controller {
             await FlutterBluePlus.stopScan();
             await Future.delayed(const Duration(milliseconds: 1000));
           }
-          continue;
+          continue;   
         }
         rethrow;
       } finally {
